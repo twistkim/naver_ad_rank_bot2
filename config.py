@@ -10,7 +10,7 @@ NAVER_CUSTOMER_ID = os.getenv("NAVER_CUSTOMER_ID", "").strip()
 
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "").strip()
 
-RANK_THRESHOLD = float(os.getenv("RANK_THRESHOLD", "1.2"))
+RANK_THRESHOLD = float(os.getenv("RANK_THRESHOLD", "1.5"))
 MIN_IMP = int(os.getenv("MIN_IMP", "30"))
 STREAK_THRESHOLD = int(os.getenv("STREAK_THRESHOLD", "2"))
 
