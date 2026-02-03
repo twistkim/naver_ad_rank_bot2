@@ -1,2 +1,24 @@
+cat >> .gitignore <<'EOF'
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# --- Virtualenv ---
+.venv/
+venv/
+ENV/
 .env
-*.env
+
+# --- Logs & runtime ---
+logs/
+*.log
+state.json
+
+# (옵션) OS / editor
+.DS_Store
+.vscode/
+.idea/
+EOF
