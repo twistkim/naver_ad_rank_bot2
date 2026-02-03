@@ -16,6 +16,8 @@ ENV/
 logs/
 *.log
 state.json
+results/
+cache/
 
 # (옵션) OS / editor
 .DS_Store

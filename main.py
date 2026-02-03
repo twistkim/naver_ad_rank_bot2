@@ -1,3 +1,6 @@
+import json
+import os
+from datetime import datetime, timezone
 from typing import Dict, Any, List
 from utils import setup_logger
 from keyword_map import load_keywords_txt, build_keyword_map
@@ -14,6 +17,76 @@ def is_top_like(imp: float, avg_rnk: float) -> bool:
     if imp < MIN_IMP:
         return False
     return avg_rnk <= RANK_THRESHOLD
+
+
+# Helper: Write per-keyword PC/MOBILE rank snapshot for verification
+def write_rank_snapshot(
+    *,
+    wanted_keywords: List[str],
+    kw_map: Dict[str, Any],
+    summary: Dict[str, Any],
+    missing: List[str],
+    keyword_ids: List[str],
+    rows_received: int,
+    out_dir: str = "out",
+) -> None:
+    """Write a per-keyword snapshot JSON so we can verify PC/MOBILE metrics each run.
+
+    Output:
+      - out/ranks_latest.json (always overwritten)
+      - out/ranks_YYYYmmdd_HHMMSSZ.json (timestamped)
+    """
+    os.makedirs(out_dir, exist_ok=True)
+
+    now = datetime.now(timezone.utc)
+    ts = now.strftime("%Y%m%d_%H%M%SZ")
+
+    report: Dict[str, Any] = {
+        "_meta": {
+            "generated_at_utc": now.isoformat(),
+            "wanted_keywords": len(wanted_keywords),
+            "in_account_keywords": len(wanted_keywords) - len(missing),
+            "missing_in_account_keywords": len(missing),
+            "keyword_ids_checked": len(keyword_ids),
+            "stats_rows_received": int(rows_received),
+        },
+        "missing_in_account": missing,
+        "keywords": {},
+    }
+
+    def pick_dev(devs: Dict[str, Any], dev_key: str) -> Dict[str, Any] | None:
+        return devs.get(dev_key) or devs.get(dev_key.lower()) or devs.get(dev_key.upper())
+
+    # Keep order stable: iterate wanted list order
+    for kw in wanted_keywords:
+        entries = kw_map.get(kw) or []
+        ids = [e.get("id") for e in entries if isinstance(e, dict) and e.get("id")]
+
+        devs = summary.get(kw) or {}
+        pc = pick_dev(devs, "PC")
+        mobile = pick_dev(devs, "MOBILE")
+
+        report["keywords"][kw] = {
+            "in_account": kw not in missing,
+            "ids": ids,
+            "PC": {
+                "avgRnk": None if not pc else pc.get("avgRnk"),
+                "imp": 0 if not pc else (pc.get("imp") or 0),
+            },
+            "MOBILE": {
+                "avgRnk": None if not mobile else mobile.get("avgRnk"),
+                "imp": 0 if not mobile else (mobile.get("imp") or 0),
+            },
+        }
+
+    latest_path = os.path.join(out_dir, "ranks_latest.json")
+    ts_path = os.path.join(out_dir, f"ranks_{ts}.json")
+
+    for path in (latest_path, ts_path):
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(report, f, ensure_ascii=False, indent=2)
+
+    LOGGER.info(f"Wrote rank snapshot JSON: {latest_path} and {ts_path}")
 
 def main():
     # 1) 입력 키워드 로드
@@ -51,9 +124,23 @@ def main():
 
     # 4) /stats 조회
     rows = fetch_stats_by_keyword_ids(keyword_ids)
-    LOGGER.info(f"/stats rows received: {len(rows)}")
+    rows_received = len(rows)
+    LOGGER.info(f"/stats rows received: {rows_received}")
 
     summary = summarize_by_keyword(rows, id_to_keyword)
+
+    # 4-1) 키워드별 PC/MOBILE avgRnk/imp 스냅샷 JSON 저장 (검증용)
+    # - out/ranks_latest.json (덮어쓰기)
+    # - out/ranks_YYYYmmdd_HHMMSSZ.json (히스토리)
+    write_rank_snapshot(
+        wanted_keywords=wanted_keywords,
+        kw_map=kw_map,
+        summary=summary,
+        missing=missing,
+        keyword_ids=keyword_ids,
+        rows_received=rows_received,
+        out_dir="out",
+    )
 
     # 5) state 로드
     state = load_state()
