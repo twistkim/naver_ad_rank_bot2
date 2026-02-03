@@ -76,62 +76,70 @@ def fetch_stats_by_keyword_ids(keyword_ids: List[str]) -> List[Dict[str, Any]]:
 
     return all_rows
 
-def summarize_by_keyword(raw_rows: List[Dict[str, Any]], id_to_keyword: Dict[str, str]) -> Dict[str, Dict[str, Dict[str, float]]]:
+# stats_checker.py
+
+from typing import Dict, Any
+
+def summarize_by_keyword(rows, id_to_keyword: Dict[str, str]) -> Dict[str, Any]:
     """
-    결과를 keyword 텍스트 기준으로 합치기.
-    반환 형태:
+    API /stats rows 예시:
       {
-        "인터넷": {
-           "PC": {"imp": 123, "clk": 4, "avgRnk": 1.12},
-           "MOBILE": {"imp": 77, "clk": 1, "avgRnk": 1.35}
-        },
-        ...
+        'avgRnk': 1,
+        'id': '...',
+        'clkCnt': 243,
+        'impCnt': 345,
+        'breakdowns': [{'name': '모바일', 'avgRnk': 1, 'clkCnt': 243, 'impCnt': 345}]
       }
 
-    avgRnk는 (노출 가중 평균)으로 합산.
+    반환:
+      {
+        '키워드': {
+           'PC': {'avgRnk': ..., 'imp': ...},
+           'MOBILE': {'avgRnk': ..., 'imp': ...}
+        }
+      }
     """
-    acc: Dict[str, Dict[str, Dict[str, float]]] = {}
+    out: Dict[str, Any] = {}
 
-    for row in raw_rows:
-        rid = row.get("id") or row.get("nccKeywordId") or row.get("keywordId")
-        if not rid:
-            continue
+    def normalize_dev(name: str):
+        n = (name or "").strip().lower()
+        if "모바일" in n or "mobile" in n:
+            return "MOBILE"
+        if n == "pc" or "desktop" in n or "데스크" in n or "피씨" in n:
+            return "PC"
+        return None
 
-        kw = id_to_keyword.get(rid)
+    for r in rows or []:
+        kid = r.get("id")
+        kw = id_to_keyword.get(kid)
         if not kw:
             continue
 
-        # breakdown 키가 "pcMblTp"로 오기도 하고, "pcMblTp" 값이 다른 키로 오기도 함
-        # 실전에서는 row를 찍어보며 맞춰야 하는데, 보통 아래 중 하나.
-        dev = (row.get("pcMblTp") or row.get("pcMblTpNm") or row.get("pcMblTpType") or "").upper()
-        if not dev:
-            # 일부 응답은 dev 값이 "PC"/"MOBILE" 등이 아닐 수 있어 fallback
-            dev = (row.get("device") or row.get("type") or "UNKNOWN").upper()
+        st = out.setdefault(kw, {
+            "PC": {"avgRnk": None, "imp": 0},
+            "MOBILE": {"avgRnk": None, "imp": 0},
+        })
 
-        imp = float(row.get("impCnt") or 0)
-        clk = float(row.get("clkCnt") or 0)
-        avg = row.get("avgRnk")
-        avg = float(avg) if avg is not None and avg != "" else None
+        # breakdowns가 있으면 breakdowns 우선
+        bds = r.get("breakdowns") or []
+        if bds:
+            for b in bds:
+                dev = normalize_dev(b.get("name", ""))
+                if not dev:
+                    continue
+                imp = b.get("impCnt")
+                if imp is None:
+                    imp = b.get("imp", 0)
+                avg = b.get("avgRnk")
 
-        acc.setdefault(kw, {}).setdefault(dev, {"imp": 0.0, "clk": 0.0, "avgRnk": 0.0, "_w": 0.0})
+                # 같은 키워드/디바이스에 여러 row가 올 수 있으면,
+                # 노출이 더 큰 값으로 최신 스냅샷을 대표시키자.
+                if imp > (st[dev].get("imp") or 0):
+                    st[dev]["imp"] = int(imp or 0)
+                    st[dev]["avgRnk"] = avg
+        else:
+            # breakdowns가 없으면 전체 row를 그대로 저장(디바이스 미상)
+            # → 일단 모바일/PC에 넣기 애매하니, imp가 있으면 둘 다 채우지 않고 패스
+            pass
 
-        acc[kw][dev]["imp"] += imp
-        acc[kw][dev]["clk"] += clk
-
-        # avgRnk 가중합: 노출 기준
-        if avg is not None and imp > 0:
-            acc[kw][dev]["avgRnk"] += avg * imp
-            acc[kw][dev]["_w"] += imp
-
-    # finalize
-    out: Dict[str, Dict[str, Dict[str, float]]] = {}
-    for kw, devs in acc.items():
-        out[kw] = {}
-        for dev, m in devs.items():
-            w = m.get("_w", 0.0)
-            out[kw][dev] = {
-                "imp": m["imp"],
-                "clk": m["clk"],
-                "avgRnk": (m["avgRnk"] / w) if w > 0 else None
-            }
     return out

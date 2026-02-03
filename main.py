@@ -57,6 +57,14 @@ def write_rank_snapshot(
     def pick_dev(devs: Dict[str, Any], dev_key: str) -> Dict[str, Any] | None:
         return devs.get(dev_key) or devs.get(dev_key.lower()) or devs.get(dev_key.upper())
 
+    def pick_imp(d: Dict[str, Any] | None) -> int:
+        if not d:
+            return 0
+        v = d.get("imp")
+        if v is None:
+            v = d.get("impCnt")
+        return int(v or 0)
+
     # Keep order stable: iterate wanted list order
     for kw in wanted_keywords:
         entries = kw_map.get(kw) or []
@@ -71,11 +79,11 @@ def write_rank_snapshot(
             "ids": ids,
             "PC": {
                 "avgRnk": None if not pc else pc.get("avgRnk"),
-                "imp": 0 if not pc else (pc.get("imp") or 0),
+                "imp": pick_imp(pc),
             },
             "MOBILE": {
                 "avgRnk": None if not mobile else mobile.get("avgRnk"),
-                "imp": 0 if not mobile else (mobile.get("imp") or 0),
+                "imp": pick_imp(mobile),
             },
         }
 
@@ -160,7 +168,10 @@ def main():
             if not dev_data:
                 continue
 
-            imp = dev_data.get("imp") or 0
+            imp = dev_data.get("imp")
+            if imp is None:
+                imp = dev_data.get("impCnt")
+            imp = int(imp or 0)
             avg = dev_data.get("avgRnk")
 
             top_like = is_top_like(imp, avg)
